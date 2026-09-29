@@ -8,6 +8,8 @@ use crate::{
     ser::{NetworkReadExt, NetworkReadSliceExt, NetworkWriteExt, ReadingError, WritingError},
 };
 
+const MAX_ARGUMENT_SIGNATURES: usize = 256;
+
 pub struct ArgumentSignature<'a> {
     pub name: &'a str,
     pub signature: &'a [u8],
@@ -29,8 +31,18 @@ impl<'a> ServerPacket<'a> for SChatCommandSigned<'a> {
         let command = read.get_str_bounded_borrowed(256)?;
         let timestamp = read.get_i64_be()?;
         let salt = read.get_i64_be()?;
-        let arg_count = read.get_var_int()?.0 as usize;
-        let mut argument_signatures = Vec::with_capacity(arg_count);
+        let arg_count = usize::try_from(read.get_var_int()?.0)
+            .map_err(|_| ReadingError::Message("Negative argument signature count".into()))?;
+        if arg_count > MAX_ARGUMENT_SIGNATURES {
+            return Err(ReadingError::TooLarge(
+                "Argument signature count exceeds packet limit".into(),
+            ));
+        }
+
+        let mut argument_signatures = Vec::new();
+        argument_signatures
+            .try_reserve_exact(arg_count)
+            .map_err(|_| ReadingError::TooLarge("Argument signatures".into()))?;
         for _ in 0..arg_count {
             let name = read.get_str_bounded_borrowed(16)?;
             let signature = read.read_slice_borrowed(256)?;

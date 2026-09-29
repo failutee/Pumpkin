@@ -8,6 +8,8 @@ use crate::{
 };
 use pumpkin_util::version::JavaMinecraftVersion;
 
+const MAX_GAME_RULE_ENTRIES: usize = 1024;
+
 pub struct GameRuleEntry<'a> {
     pub game_rule_key: &'a str,
     pub value: &'a str,
@@ -20,8 +22,18 @@ pub struct SSetGameRule<'a> {
 
 impl<'a> ServerPacket<'a> for SSetGameRule<'a> {
     fn read(bytebuf: &mut &'a [u8], _version: &JavaMinecraftVersion) -> Result<Self, ReadingError> {
-        let count = bytebuf.get_var_int()?.0 as usize;
-        let mut entries = Vec::with_capacity(count);
+        let count = usize::try_from(bytebuf.get_var_int()?.0)
+            .map_err(|_| ReadingError::Message("Negative game rule entry count".into()))?;
+        if count > MAX_GAME_RULE_ENTRIES {
+            return Err(ReadingError::TooLarge(
+                "Game rule entry count exceeds packet limit".into(),
+            ));
+        }
+
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(count)
+            .map_err(|_| ReadingError::TooLarge("Game rule entries".into()))?;
         for _ in 0..count {
             let game_rule_key = bytebuf.get_str_borrowed()?;
             let value = bytebuf.get_str_borrowed()?;
